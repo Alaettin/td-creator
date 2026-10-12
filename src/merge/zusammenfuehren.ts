@@ -1,6 +1,6 @@
 import type { ConceptDescription, Element, Qualifier, Submodel, Umgebung } from "./typen";
 import { leererBericht, type Bericht, type Fund } from "./bericht";
-import { alleElemente, blaetter, cdId, semantikSchluessel } from "./sammeln";
+import { blaetter, cdId, semantikSchluessel } from "./sammeln";
 
 export const TD_SEMANTIK = "0173-1#01-AHX837#002";
 export const BEREICHE_SEMANTIK = "0173-1#02-ABK163#002";
@@ -38,13 +38,6 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
     throw new MergeFehler("Die Vorlage enthält keine TechnicalPropertyAreas mit Bereichseintrag");
   }
 
-  // Was die Vorlage außerhalb der Bereiche schon führt, kommt nicht ein zweites Mal hinein.
-  const vorlageSemantik = new Set(
-    alleElemente(td.submodelElements!.filter((e) => e !== bereiche))
-      .map((e) => semantikSchluessel(e.semanticId))
-      .filter((s): s is string => s !== undefined),
-  );
-
   const cdIndex = new Map<string, ConceptDescription>();
   for (const eintrag of eintraege) {
     for (const cd of eintrag.conceptDescriptions) if (!cdIndex.has(cd.id)) cdIndex.set(cd.id, cd);
@@ -54,7 +47,9 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
   const erste = new Map<string, Element>();
   const idShorts = new Set<string>();
   const neueCDs: ConceptDescription[] = [];
-  const vorhandeneCDs = new Set((umgebung.conceptDescriptions ?? []).map((cd) => cd.id));
+  // Ein Element darf doppelt im Submodel stehen, eine ConceptDescription nie: maßgeblich ist ihre id.
+  const vorlageCDs = new Set((umgebung.conceptDescriptions ?? []).map((cd) => cd.id));
+  const uebernommeneCDs = new Set<string>();
 
   for (const eintrag of eintraege) {
     bericht.submodelZahl++;
@@ -67,10 +62,6 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
 
       if (!semanticId) {
         bericht.ohneSemanticId.push(fund);
-        continue;
-      }
-      if (vorlageSemantik.has(semanticId)) {
-        bericht.vorlageDubletten.push(fund);
         continue;
       }
       const frueher = erste.get(semanticId);
@@ -95,11 +86,15 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
       bericht.uebernommen.push({ ...fund, idShort: element.idShort });
 
       const id = cdId(blatt.semanticId)!;
-      if (vorhandeneCDs.has(id)) continue;
+      if (vorlageCDs.has(id)) {
+        bericht.cdAusVorlage.push({ ...fund, idShort: element.idShort });
+        continue;
+      }
+      if (uebernommeneCDs.has(id)) continue;
       const cd = cdIndex.get(id);
       if (cd) {
         neueCDs.push(structuredClone(cd));
-        vorhandeneCDs.add(id);
+        uebernommeneCDs.add(id);
       } else {
         bericht.fehlendeCDs.push(fund);
       }

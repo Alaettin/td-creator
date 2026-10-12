@@ -62,17 +62,23 @@ describe.skipIf(!beispiel)("mit AAS-6455", () => {
 
   it("legt genau einen Bereich ohne Platzhalter an", () => {
     expect(inhalt.some((e) => semantikSchluessel(e.semanticId) === ARBITRARY)).toBe(false);
-    expect(inhalt).toHaveLength(120);
-    expect(bericht.uebernommen).toHaveLength(120);
+    expect(inhalt).toHaveLength(123);
+    expect(bericht.uebernommen).toHaveLength(123);
     expect(bericht.gelesen).toBe(123);
   });
 
-  it("lässt die drei Semantiken weg, die GeneralInformation schon führt", () => {
-    expect(bericht.vorlageDubletten.map((f) => f.semanticId).sort()).toEqual([
-      "0173-1#02-AAO676#005",
-      "0173-1#02-AAO677#004",
-      "0173-1#02-AAW338#003",
-    ]);
+  it("nimmt Vorlagen-Semantiken auf, ohne ihre ConceptDescription zu verdoppeln", () => {
+    const vorlagenSemantik = ["0173-1#02-AAO676#005", "0173-1#02-AAO677#004", "0173-1#02-AAW338#003"];
+    expect(bericht.cdAusVorlage.map((f) => f.semanticId).sort()).toEqual(vorlagenSemantik);
+    for (const s of vorlagenSemantik) {
+      expect(inhalt.some((e) => semantikSchluessel(e.semanticId) === s)).toBe(true);
+      expect(umgebung.conceptDescriptions!.filter((c) => c.id === s)).toHaveLength(1);
+    }
+  });
+
+  it("enthält jede ConceptDescription-id nur einmal", () => {
+    const ids = umgebung.conceptDescriptions!.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("macht jedes Element optional und leer", () => {
@@ -90,6 +96,7 @@ describe.skipIf(!beispiel)("mit AAS-6455", () => {
     expect(bericht.neueCDs).toBe(120);
     expect(bericht.fehlendeCDs).toEqual([]);
     expect(umgebung.conceptDescriptions).toHaveLength(vorlage.conceptDescriptions!.length + 120);
+    expect(umgebung.conceptDescriptions).toHaveLength(148);
   });
 
   it("hat eindeutige idShorts", () => {
@@ -191,6 +198,29 @@ describe("Merge-Regeln", () => {
     expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["S"]);
     expect(umgebung.conceptDescriptions!.filter((c) => c.id === section)).toHaveLength(1);
     expect(bericht.neueCDs).toBe(0);
+  });
+
+  it("nimmt ein Element der Vorlage erneut auf und behält deren ConceptDescription", () => {
+    const id = "0173-1#02-AAO677#004";
+    const fremd: ConceptDescription = { modelType: "ConceptDescription", id, idShort: "AusDerQuelle" };
+    const d = datei("d.json", [sm("A", [prop("Manufacturer_name", id)])], [fremd]);
+    const { umgebung, bericht } = zusammenfuehren(vorlage, eintraegeAus(d));
+    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Manufacturer_name"]);
+    const treffer = umgebung.conceptDescriptions!.filter((c) => c.id === id);
+    expect(treffer).toEqual([vorlage.conceptDescriptions!.find((c) => c.id === id)]);
+    expect(bericht.cdAusVorlage.map((f) => f.idShort)).toEqual(["Manufacturer_name"]);
+    expect(bericht.neueCDs).toBe(0);
+  });
+
+  it("legt eine CD nur einmal an, wenn zwei semanticIds auf dieselbe id zeigen", () => {
+    // Zwei Elemente, zwei Merge-Schlüssel, aber derselbe letzte Schlüssel und damit dieselbe CD.
+    const zweiteilig = prop("Zweiteilig", "X#1");
+    zweiteilig.semanticId!.keys.unshift({ type: "GlobalReference", value: "Block#1" });
+    const d = datei("d.json", [sm("A", [prop("Einfach", "X#1"), zweiteilig])], [cd("X#1")]);
+    const { umgebung, bericht } = zusammenfuehren(vorlage, eintraegeAus(d));
+    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Einfach", "Zweiteilig"]);
+    expect(umgebung.conceptDescriptions!.filter((c) => c.id === "X#1")).toHaveLength(1);
+    expect(bericht.neueCDs).toBe(1);
   });
 
   it("ersetzt eine vorhandene Kardinalität statt sie zu verdoppeln", () => {

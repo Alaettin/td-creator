@@ -16,19 +16,6 @@ export function blaetter(elemente: Element[]): Element[] {
   return ergebnis;
 }
 
-/** Alle Elemente, Behälter eingeschlossen. */
-export function alleElemente(elemente: Element[]): Element[] {
-  const ergebnis: Element[] = [];
-  for (const element of elemente) {
-    ergebnis.push(element);
-    const kinder = element.modelType === "Entity" ? element.statements : element.value;
-    if (BEHAELTER.has(element.modelType) && Array.isArray(kinder)) {
-      ergebnis.push(...alleElemente(kinder as Element[]));
-    }
-  }
-  return ergebnis;
-}
-
 /** Exakter Vergleichsschlüssel einer semanticId, Version eingeschlossen. */
 export function semantikSchluessel(referenz: Reference | undefined): string | undefined {
   const werte = referenz?.keys?.map((k) => k.value.trim()).filter(Boolean) ?? [];

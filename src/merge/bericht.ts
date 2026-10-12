@@ -8,8 +8,8 @@ export interface Bericht {
   submodelZahl: number;
   gelesen: number;
   uebernommen: Fund[];
-  /** semanticId steht schon anderswo in der Vorlage (z. B. GeneralInformation). */
-  vorlageDubletten: Fund[];
+  /** Element übernommen; seine ConceptDescription steht schon in der Vorlage und wird nicht doppelt angelegt. */
+  cdAusVorlage: Fund[];
   /** semanticId kam schon aus einer früheren Quelle. */
   mehrfach: Fund[];
   /** Gleiche semanticId, aber anderer modelType oder valueType als der erste Treffer. */
@@ -26,7 +26,7 @@ export function leererBericht(): Bericht {
     submodelZahl: 0,
     gelesen: 0,
     uebernommen: [],
-    vorlageDubletten: [],
+    cdAusVorlage: [],
     mehrfach: [],
     konflikte: [],
     umbenannt: [],

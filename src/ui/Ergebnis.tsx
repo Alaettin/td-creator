@@ -38,7 +38,7 @@ export function ErgebnisAnsicht({ ergebnis }: { ergebnis: Ergebnis }) {
 
       <div className="flex flex-col gap-2">
         <Liste titel="Übernommen" funde={bericht.uebernommen} />
-        <Liste titel="Weggelassen, steht schon in der Vorlage" funde={bericht.vorlageDubletten} />
+        <Liste titel="ConceptDescription aus der Vorlage verwendet" funde={bericht.cdAusVorlage} />
         <Liste titel="Mehrfach in den Quellen, erster Treffer gilt" funde={bericht.mehrfach} />
         <Liste
           titel="Konflikte: gleiche semanticId, anderer Typ"
