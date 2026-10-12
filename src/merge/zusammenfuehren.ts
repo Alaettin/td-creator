@@ -1,5 +1,5 @@
-import type { ConceptDescription, Element, Qualifier, Submodel, Umgebung } from "./typen";
-import { leererBericht, type Bericht, type Fund } from "./bericht";
+import type { ConceptDescription, Element, Qualifier, Reference, Submodel, Umgebung } from "./typen";
+import { leererBericht, type Bericht, type Fund, type Mehrfach } from "./bericht";
 import { blaetter, cdId, semantikSchluessel } from "./sammeln";
 
 export const TD_SEMANTIK = "0173-1#01-AHX837#002";
@@ -44,7 +44,8 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
   }
 
   const inhalt: Element[] = [];
-  const erste = new Map<string, Element>();
+  const erste = new Map<string, { blatt: Element; fund: Fund }>();
+  const mehrfach = new Map<string, Mehrfach>();
   const idShorts = new Set<string>();
   const neueCDs: ConceptDescription[] = [];
   // Ein Element darf doppelt im Submodel stehen, eine ConceptDescription nie: maßgeblich ist ihre id.
@@ -66,24 +67,30 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
       }
       const frueher = erste.get(semanticId);
       if (frueher) {
-        const erwartet = typBeschreibung(frueher);
+        const erwartet = typBeschreibung(frueher.blatt);
         const gefunden = typBeschreibung(blatt);
-        if (erwartet !== gefunden) bericht.konflikte.push({ ...fund, erwartet, gefunden });
-        else bericht.mehrfach.push(fund);
+        if (erwartet !== gefunden) {
+          bericht.konflikte.push({ ...fund, erwartet, gefunden });
+        } else {
+          const eintrag = mehrfach.get(semanticId) ?? { ...frueher.fund, weitere: [] };
+          eintrag.weitere.push(quelle);
+          mehrfach.set(semanticId, eintrag);
+        }
         continue;
       }
 
       const element = alsTemplateElement(blatt);
-      const gewuenscht = blatt.idShort || "Eigenschaft";
+      const gewuenscht = mitVersion(blatt.idShort || "Eigenschaft", blatt.semanticId);
       element.idShort = freierName(gewuenscht, idShorts);
-      if (element.idShort !== blatt.idShort) {
+      if (element.idShort !== gewuenscht || !blatt.idShort) {
         bericht.umbenannt.push({ ...fund, idShort: element.idShort, von: blatt.idShort ?? "" });
       }
       if (!IDSHORT_REGEL.test(element.idShort)) bericht.ungueltigeIdShorts.push({ ...fund, idShort: element.idShort });
       idShorts.add(element.idShort);
-      erste.set(semanticId, blatt);
+      const uebernommen = { ...fund, idShort: element.idShort };
+      erste.set(semanticId, { blatt, fund: uebernommen });
       inhalt.push(element);
-      bericht.uebernommen.push({ ...fund, idShort: element.idShort });
+      bericht.uebernommen.push(uebernommen);
 
       const id = cdId(blatt.semanticId)!;
       if (vorlageCDs.has(id)) {
@@ -105,8 +112,21 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
   bereiche.value = [bereich];
   umgebung.conceptDescriptions = [...(umgebung.conceptDescriptions ?? []), ...neueCDs];
   bericht.neueCDs = neueCDs.length;
+  bericht.mehrfach = [...mehrfach.values()];
 
   return { umgebung, bericht };
+}
+
+/** Version einer IRDI wie 0173-1#02-AAO677#004: die drei Ziffern nach dem letzten #. */
+export function eclassVersion(referenz: Reference | undefined): string | undefined {
+  return cdId(referenz)?.match(/#(\d{3})$/)?.[1];
+}
+
+/** Hängt _v<Version> an, sofern die semanticId eine hat und der Name sie noch nicht trägt. */
+function mitVersion(idShort: string, referenz: Reference | undefined): string {
+  const version = eclassVersion(referenz);
+  if (!version || idShort.endsWith(`_v${version}`)) return idShort;
+  return `${idShort}_v${version}`;
 }
 
 function typBeschreibung(e: Element): string {

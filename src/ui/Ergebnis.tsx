@@ -15,6 +15,8 @@ function herunterladen(inhalt: unknown) {
 
 export function ErgebnisAnsicht({ ergebnis }: { ergebnis: Ergebnis }) {
   const { bericht } = ergebnis;
+  const weitere = bericht.mehrfach.reduce((summe, m) => summe + m.weitere.length, 0);
+  const zahl = (n: number) => n.toLocaleString("de-DE");
 
   return (
     <section className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5">
@@ -35,18 +37,32 @@ export function ErgebnisAnsicht({ ergebnis }: { ergebnis: Ergebnis }) {
         <Kennzahl name="Übernommen" wert={bericht.uebernommen.length} />
         <Kennzahl name="Neue CDs" wert={bericht.neueCDs} />
       </dl>
+      <p className="text-xs text-slate-500 tabular-nums">
+        Gelesen {zahl(bericht.gelesen)} = {zahl(bericht.uebernommen.length)} übernommen + {zahl(weitere)} weitere
+        Vorkommen derselben Eigenschaften + {zahl(bericht.konflikte.length)} Konflikte +{" "}
+        {zahl(bericht.ohneSemanticId.length)} ohne semanticId
+      </p>
 
       <div className="flex flex-col gap-2">
         <Liste titel="Übernommen" funde={bericht.uebernommen} />
         <Liste titel="ConceptDescription aus der Vorlage verwendet" funde={bericht.cdAusVorlage} />
-        <Liste titel="Mehrfach in den Quellen, erster Treffer gilt" funde={bericht.mehrfach} />
+        <Liste
+          titel="In mehreren Submodels, einmal übernommen"
+          funde={bericht.mehrfach}
+          zusatz={(f) => `zusätzlich in ${f.weitere.length} Submodel${f.weitere.length === 1 ? "" : "s"}`}
+          hinweis={(f) => [`übernommen aus ${f.quelle}`, ...f.weitere].join("\n")}
+        />
         <Liste
           titel="Konflikte: gleiche semanticId, anderer Typ"
           warnung
           funde={bericht.konflikte}
           zusatz={(f) => `${f.erwartet} gegen ${f.gefunden}`}
         />
-        <Liste titel="Umbenannt, weil der idShort schon vergeben war" funde={bericht.umbenannt} zusatz={(f) => `vorher ${f.von || "ohne idShort"}`} />
+        <Liste
+          titel="Name mit Zähler ergänzt, weil er schon vergeben war"
+          funde={bericht.umbenannt}
+          zusatz={(f) => `in der Quelle ${f.von || "ohne idShort"}`}
+        />
         <Liste titel="Weggelassen, keine semanticId" warnung funde={bericht.ohneSemanticId} />
         <Liste titel="idShort verstößt gegen die AAS-Regel" warnung funde={bericht.ungueltigeIdShorts} />
         <Liste titel="Keine ConceptDescription in den Quellen" warnung funde={bericht.fehlendeCDs} />
@@ -69,11 +85,14 @@ function Liste<T extends Fund>({
   funde,
   warnung = false,
   zusatz,
+  hinweis,
 }: {
   titel: string;
   funde: T[];
   warnung?: boolean;
   zusatz?: (f: T) => string;
+  /** Tooltip der Zusatzspalte. */
+  hinweis?: (f: T) => string;
 }) {
   if (funde.length === 0) return null;
   return (
@@ -88,7 +107,9 @@ function Liste<T extends Fund>({
               <tr key={i} className="border-b border-slate-100 last:border-0">
                 <td className="w-1/4 break-words px-3 py-1.5 font-medium">{f.idShort || "(ohne)"}</td>
                 <td className="w-1/3 break-all px-3 py-1.5 font-mono text-slate-600">{f.semanticId || "(ohne)"}</td>
-                <td className="px-3 py-1.5 text-slate-500">{zusatz ? zusatz(f) : f.quelle}</td>
+                <td className="px-3 py-1.5 text-slate-500" title={hinweis?.(f)}>
+                  {zusatz ? zusatz(f) : f.quelle}
+                </td>
               </tr>
             ))}
           </tbody>

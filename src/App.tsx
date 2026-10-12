@@ -11,7 +11,7 @@ const vorlage = vorlageDaten as unknown as Umgebung;
 
 export function App() {
   const [quellen, setQuellen] = useState<Quelle[]>([]);
-  const [fehler, setFehler] = useState<string[]>([]);
+  const [fehler, setFehler] = useState<{ datei: string; text: string }[]>([]);
   // Gespeichert wird nur, was abgewählt ist: neue Submodels sind damit von selbst ausgewählt.
   const [abgewaehlt, setAbgewaehlt] = useState<Set<string>>(new Set());
   const [ergebnis, setErgebnis] = useState<Ergebnis | null>(null);
@@ -20,18 +20,21 @@ export function App() {
 
   async function dateienAnnehmen(dateien: File[]) {
     const neu: Quelle[] = [];
-    const meldungen: string[] = [];
+    const meldungen: { datei: string; text: string }[] = [];
     for (const datei of dateien) {
       try {
         neu.push(einlesen(datei.name, await datei.text()));
       } catch (e) {
-        meldungen.push(e instanceof EinleseFehler ? e.message : `${datei.name}: ${(e as Error).message}`);
+        const text = e instanceof EinleseFehler ? e.message : `${datei.name}: ${(e as Error).message}`;
+        meldungen.push({ datei: datei.name, text });
       }
     }
     // Eine erneut abgelegte Datei gleichen Namens ersetzt die alte.
     const namen = new Set(neu.map((q) => q.datei));
     setQuellen((alt) => [...alt.filter((q) => !namen.has(q.datei)), ...neu]);
-    setFehler(meldungen);
+    // Ablagen laufen nebeneinander: jede ersetzt nur die Meldungen ihrer eigenen Dateien.
+    const betroffen = new Set(dateien.map((d) => d.name));
+    setFehler((alt) => [...alt.filter((f) => !betroffen.has(f.datei)), ...meldungen]);
     setErgebnis(null);
   }
 
@@ -75,7 +78,7 @@ export function App() {
       {fehler.length > 0 && (
         <ul className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
           {fehler.map((f) => (
-            <li key={f}>{f}</li>
+            <li key={f.datei}>{f.text}</li>
           ))}
         </ul>
       )}

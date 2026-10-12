@@ -104,6 +104,14 @@ describe.skipIf(!beispiel)("mit AAS-6455", () => {
     expect(new Set(namen).size).toBe(namen.length);
   });
 
+  it("trägt in jedem idShort die ECLASS-Version seiner semanticId", () => {
+    for (const e of inhalt) {
+      const version = e.semanticId!.keys[0].value.slice(-3);
+      expect(e.idShort).toMatch(new RegExp(`_v${version}$`));
+    }
+    expect(inhalt.map((e) => e.idShort)).toContain("Manufacturer_name_v004");
+  });
+
   it("lässt IDs und alle anderen Teile der Vorlage unverändert", () => {
     const vorher = vorlage.submodels![0];
     const nachher = umgebung.submodels![0];
@@ -138,8 +146,34 @@ describe("Merge-Regeln", () => {
     const b = datei("b.json", [sm("B", [prop("Width", "X#1"), prop("Tiefe", "X#3")])], [cd("X#1"), cd("X#3")]);
     const { umgebung, bericht } = zusammenfuehren(vorlage, eintraegeAus(a, b));
     expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Breite", "Hoehe", "Tiefe"]);
-    expect(bericht.mehrfach).toEqual([{ idShort: "Width", semanticId: "X#1", quelle: "b.json › B" }]);
+    expect(bericht.mehrfach).toEqual([
+      { idShort: "Breite", semanticId: "X#1", quelle: "a.json › A", weitere: ["b.json › B"] },
+    ]);
     expect(umgebung.conceptDescriptions!.filter((c) => c.id === "X#1")).toHaveLength(1);
+  });
+
+  it("zählt Mehrfaches je Eigenschaft, und die Bilanz geht auf", () => {
+    const d = datei(
+      "d.json",
+      [
+        sm("A", [prop("W", "X#1"), prop("H", "X#2")]),
+        sm("B", [prop("W", "X#1"), prop("H", "X#2", "xs:int")]),
+        sm("C", [prop("W", "X#1"), prop("Ohne", "")]),
+      ],
+      [],
+    );
+    d.submodels[2].submodel.submodelElements![1].semanticId = undefined;
+    const { bericht } = zusammenfuehren(vorlage, eintraegeAus(d));
+    expect(bericht.mehrfach).toEqual([
+      { idShort: "W", semanticId: "X#1", quelle: "d.json › A", weitere: ["d.json › B", "d.json › C"] },
+    ]);
+    const weitere = bericht.mehrfach.reduce((s, m) => s + m.weitere.length, 0);
+    expect(bericht.gelesen).toBe(
+      bericht.uebernommen.length + weitere + bericht.konflikte.length + bericht.ohneSemanticId.length,
+    );
+    expect([bericht.uebernommen.length, weitere, bericht.konflikte.length, bericht.ohneSemanticId.length]).toEqual([
+      2, 2, 1, 1,
+    ]);
   });
 
   it("liest mehrere Submodels aus einer Datei", () => {
@@ -157,11 +191,28 @@ describe("Merge-Regeln", () => {
       [],
     );
     const { umgebung, bericht } = zusammenfuehren(vorlage, eintraegeAus(d));
-    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Temp", "Temp_2"]);
-    expect(bericht.umbenannt).toEqual([
-      { idShort: "Temp_2", von: "Temp", semanticId: "0173-1#02-BAA039#012", quelle: "d.json › A" },
-    ]);
+    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Temp_v011", "Temp_v012"]);
+    expect(bericht.umbenannt).toEqual([]);
     expect(bericht.fehlendeCDs).toHaveLength(2);
+  });
+
+  it("zählt hoch, wenn zwei Eigenschaften gleichen Namen und gleiche Version haben", () => {
+    const d = datei("d.json", [sm("A", [prop("X", "0173-1#02-AAA111#004"), prop("X", "0173-1#02-BBB222#004")])], []);
+    const { umgebung, bericht } = zusammenfuehren(vorlage, eintraegeAus(d));
+    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["X_v004", "X_v004_2"]);
+    expect(bericht.umbenannt).toEqual([
+      { idShort: "X_v004_2", von: "X", semanticId: "0173-1#02-BBB222#004", quelle: "d.json › A" },
+    ]);
+  });
+
+  it("hängt ohne ECLASS-Version nichts an und verdoppelt ein vorhandenes Suffix nicht", () => {
+    const d = datei(
+      "d.json",
+      [sm("A", [prop("Url", "https://example.com/merkmal/1"), prop("Schon_v005", "0173-1#02-CCC333#005")])],
+      [],
+    );
+    const { umgebung } = zusammenfuehren(vorlage, eintraegeAus(d));
+    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Url", "Schon_v005"]);
   });
 
   it("meldet abweichende Typen derselben semanticId als Konflikt", () => {
@@ -205,10 +256,10 @@ describe("Merge-Regeln", () => {
     const fremd: ConceptDescription = { modelType: "ConceptDescription", id, idShort: "AusDerQuelle" };
     const d = datei("d.json", [sm("A", [prop("Manufacturer_name", id)])], [fremd]);
     const { umgebung, bericht } = zusammenfuehren(vorlage, eintraegeAus(d));
-    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Manufacturer_name"]);
+    expect(bereichsInhalt(umgebung).map((e) => e.idShort)).toEqual(["Manufacturer_name_v004"]);
     const treffer = umgebung.conceptDescriptions!.filter((c) => c.id === id);
     expect(treffer).toEqual([vorlage.conceptDescriptions!.find((c) => c.id === id)]);
-    expect(bericht.cdAusVorlage.map((f) => f.idShort)).toEqual(["Manufacturer_name"]);
+    expect(bericht.cdAusVorlage.map((f) => f.idShort)).toEqual(["Manufacturer_name_v004"]);
     expect(bericht.neueCDs).toBe(0);
   });
 
