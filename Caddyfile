@@ -1,0 +1,12 @@
+# Sliplane beendet TLS vor dem Container, deshalb nur HTTP und kein eigenes Zertifikat.
+http://:{$PORT:8080} {
+	root * /srv
+	encode zstd gzip
+	try_files {path} /index.html
+	file_server
+
+	log {
+		output stdout
+		format console
+	}
+}
