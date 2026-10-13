@@ -1,57 +1,27 @@
-import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { einlesen, EinleseFehler } from "../src/merge/einlesen";
-import { BEREICHE_SEMANTIK, zusammenfuehren, type Eintrag } from "../src/merge/zusammenfuehren";
+import { BEREICHE_SEMANTIK, zusammenfuehren } from "../src/merge/zusammenfuehren";
 import { semantikSchluessel } from "../src/merge/sammeln";
-import type { ConceptDescription, Element, Submodel, Umgebung } from "../src/merge/typen";
+import type { ConceptDescription, Element, Submodel } from "../src/merge/typen";
+import {
+  beispiel as ladeBeispiel,
+  bereichsInhalt,
+  cd,
+  datei,
+  eintraegeAus,
+  leereQuelle,
+  prop,
+  sm,
+  vorlage,
+  vorlageText,
+} from "./hilfen";
 
-const vorlageText = readFileSync(new URL("../vorlagen/IDTA-02003-TechnicalData-2.0.json", import.meta.url), "utf8");
-const vorlage: Umgebung = JSON.parse(vorlageText);
-// Das Beispiel enthält lizenzierte ECLASS-Inhalte und liegt nur lokal, nicht im Repo.
-const beispielPfad = new URL("../beispiele/AAS-6455.json", import.meta.url);
-const beispiel = existsSync(beispielPfad) ? einlesen("AAS-6455.json", readFileSync(beispielPfad, "utf8")) : undefined;
-
+const beispiel = ladeBeispiel("AAS-6455.json");
 const ARBITRARY = "https://admin-shell.io/SMT/General/Arbitrary";
-
-function eintraegeAus(...quellen: ReturnType<typeof einlesen>[]): Eintrag[] {
-  return quellen.flatMap((q) =>
-    q.submodels.map((s) => ({ datei: q.datei, submodel: s.submodel, conceptDescriptions: q.conceptDescriptions })),
-  );
-}
-
-function bereichsInhalt(u: Umgebung): Element[] {
-  const td = u.submodels![0];
-  const bereiche = td.submodelElements!.find((e) => semantikSchluessel(e.semanticId) === BEREICHE_SEMANTIK)!;
-  const liste = bereiche.value as Element[];
-  expect(liste).toHaveLength(1);
-  return liste[0].value as Element[];
-}
-
-function prop(idShort: string, sem: string, valueType = "xs:string", extra: Partial<Element> = {}): Element {
-  return {
-    modelType: "Property",
-    idShort,
-    valueType,
-    semanticId: { type: "ExternalReference", keys: [{ type: "GlobalReference", value: sem }] },
-    ...extra,
-  };
-}
-
-function cd(id: string): ConceptDescription {
-  return { modelType: "ConceptDescription", id };
-}
-
-function datei(name: string, submodels: Submodel[], cds: ConceptDescription[]) {
-  return einlesen(name, JSON.stringify({ submodels, conceptDescriptions: cds }));
-}
-
-function sm(idShort: string, elemente: Element[]): Submodel {
-  return { modelType: "Submodel", id: `urn:${idShort}`, idShort, submodelElements: elemente };
-}
 
 describe.skipIf(!beispiel)("mit AAS-6455", () => {
   // Der Rumpf läuft beim Einsammeln auch beim Überspringen; mit leerer Quelle bleiben die Tests sichtbar.
-  const quelle = beispiel ?? { datei: "", submodels: [], conceptDescriptions: [] };
+  const quelle = beispiel ?? leereQuelle;
   const { umgebung, bericht } = zusammenfuehren(vorlage, eintraegeAus(quelle));
   const inhalt = bereichsInhalt(umgebung);
 

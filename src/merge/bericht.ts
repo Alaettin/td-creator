@@ -21,9 +21,14 @@ export interface Bericht {
   konflikte: (Fund & { erwartet: string; gefunden: string })[];
   umbenannt: (Fund & { von: string })[];
   ohneSemanticId: Fund[];
+  /** Nur Advanced: Blöcke ohne semanticId; ihr Inhalt steht eine Ebene höher. */
+  aufgeloesteBloecke: Fund[];
   ungueltigeIdShorts: Fund[];
-  fehlendeCDs: Fund[];
+  /** cdId ist die fehlende id; bei zusammengesetzten Block-ids ein Teil davon. */
+  fehlendeCDs: (Fund & { cdId: string })[];
   neueCDs: number;
+  /** Nur Advanced: angelegte Blöcke. */
+  bloecke: number;
 }
 
 export function leererBericht(): Bericht {
@@ -36,8 +41,10 @@ export function leererBericht(): Bericht {
     konflikte: [],
     umbenannt: [],
     ohneSemanticId: [],
+    aufgeloesteBloecke: [],
     ungueltigeIdShorts: [],
     fehlendeCDs: [],
     neueCDs: 0,
+    bloecke: 0,
   };
 }

@@ -7,9 +7,13 @@ export const BEREICHE_SEMANTIK = "0173-1#02-ABK163#002";
 const KARDINALITAET_SEMANTIK = "https://admin-shell.io/SubmodelTemplates/SMT/Cardinality/1/0";
 // AAS 3.0 (aas-core3.0): Buchstabe am Anfang, danach nur Buchstaben, Ziffern, Unterstrich.
 const IDSHORT_REGEL = /^[a-zA-Z][a-zA-Z0-9_]*$/;
+const BLOCK = "SubmodelElementCollection";
 
 /** Werte, die zu einer Instanz gehören und im Template nichts verloren haben. */
 const INSTANZWERTE = ["value", "valueId", "min", "max"];
+
+/** basic: alle Eigenschaften flach in einem Bereich; advanced: ECLASS-Blöcke bleiben als Struktur erhalten. */
+export type Modus = "basic" | "advanced";
 
 export interface Eintrag {
   datei: string;
@@ -24,7 +28,26 @@ export interface Ergebnis {
 
 export class MergeFehler extends Error {}
 
-export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebnis {
+/** Eine Ebene im Ergebnis: der Bereich selbst oder ein Block. Entdoppelung und idShorts gelten je Ebene. */
+interface Behaelter {
+  liste: Element[];
+  index: Map<string, { quelle: Element; ziel: Element; fund: Fund }>;
+  namen: Set<string>;
+  /** idShort-Pfad für den Bericht, z. B. "Identification_v010.Manufacturer_v010." */
+  pfad: string;
+  /** Pfad aus semanticIds, damit Mehrfach-Funde je Ort gezählt werden. */
+  ort: string;
+}
+
+function neuerBehaelter(liste: Element[], pfad: string, ort: string): Behaelter {
+  return { liste, index: new Map(), namen: new Set(), pfad, ort };
+}
+
+export function zusammenfuehren(
+  vorlage: Umgebung,
+  eintraege: Eintrag[],
+  { modus }: { modus: Modus } = { modus: "basic" },
+): Ergebnis {
   const umgebung = structuredClone(vorlage);
   const bericht = leererBericht();
 
@@ -43,58 +66,23 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
     for (const cd of eintrag.conceptDescriptions) if (!cdIndex.has(cd.id)) cdIndex.set(cd.id, cd);
   }
 
-  const inhalt: Element[] = [];
-  const erste = new Map<string, { blatt: Element; fund: Fund }>();
+  const wurzel = neuerBehaelter([], "", "");
+  const kinderVon = new Map<Element, Behaelter>();
   const mehrfach = new Map<string, Mehrfach>();
-  const idShorts = new Set<string>();
   const neueCDs: ConceptDescription[] = [];
   // Ein Element darf doppelt im Submodel stehen, eine ConceptDescription nie: maßgeblich ist ihre id.
   const vorlageCDs = new Set((umgebung.conceptDescriptions ?? []).map((cd) => cd.id));
   const uebernommeneCDs = new Set<string>();
 
-  for (const eintrag of eintraege) {
-    bericht.submodelZahl++;
-    const quelle = `${eintrag.datei} › ${eintrag.submodel.idShort ?? eintrag.submodel.id}`;
-
-    for (const blatt of blaetter(eintrag.submodel.submodelElements ?? [])) {
-      bericht.gelesen++;
-      const semanticId = semantikSchluessel(blatt.semanticId);
-      const fund: Fund = { idShort: blatt.idShort ?? "", semanticId: semanticId ?? "", quelle };
-
-      if (!semanticId) {
-        bericht.ohneSemanticId.push(fund);
-        continue;
-      }
-      const frueher = erste.get(semanticId);
-      if (frueher) {
-        const erwartet = typBeschreibung(frueher.blatt);
-        const gefunden = typBeschreibung(blatt);
-        if (erwartet !== gefunden) {
-          bericht.konflikte.push({ ...fund, erwartet, gefunden });
-        } else {
-          const eintrag = mehrfach.get(semanticId) ?? { ...frueher.fund, weitere: [] };
-          eintrag.weitere.push(quelle);
-          mehrfach.set(semanticId, eintrag);
-        }
-        continue;
-      }
-
-      const element = alsTemplateElement(blatt);
-      const gewuenscht = mitVersion(blatt.idShort || "Eigenschaft", blatt.semanticId);
-      element.idShort = freierName(gewuenscht, idShorts);
-      if (element.idShort !== gewuenscht || !blatt.idShort) {
-        bericht.umbenannt.push({ ...fund, idShort: element.idShort, von: blatt.idShort ?? "" });
-      }
-      if (!IDSHORT_REGEL.test(element.idShort)) bericht.ungueltigeIdShorts.push({ ...fund, idShort: element.idShort });
-      idShorts.add(element.idShort);
-      const uebernommen = { ...fund, idShort: element.idShort };
-      erste.set(semanticId, { blatt, fund: uebernommen });
-      inhalt.push(element);
-      bericht.uebernommen.push(uebernommen);
-
-      const id = cdId(blatt.semanticId)!;
+  /** Erst die ganze id; kennt sie niemand, die Teile einer zusammengesetzten Block-id (02-…/01-…). */
+  function cdsUebernehmen(referenz: Reference | undefined, fund: Fund) {
+    const ganz = cdId(referenz);
+    if (!ganz) return;
+    const bekannt = vorlageCDs.has(ganz) || uebernommeneCDs.has(ganz) || cdIndex.has(ganz);
+    const kandidaten = bekannt ? [ganz] : ganz.split("/").map((t) => t.trim()).filter(Boolean);
+    for (const id of kandidaten) {
       if (vorlageCDs.has(id)) {
-        bericht.cdAusVorlage.push({ ...fund, idShort: element.idShort });
+        bericht.cdAusVorlage.push(fund);
         continue;
       }
       if (uebernommeneCDs.has(id)) continue;
@@ -103,12 +91,82 @@ export function zusammenfuehren(vorlage: Umgebung, eintraege: Eintrag[]): Ergebn
         neueCDs.push(structuredClone(cd));
         uebernommeneCDs.add(id);
       } else {
-        bericht.fehlendeCDs.push(fund);
+        bericht.fehlendeCDs.push({ ...fund, cdId: id });
       }
     }
   }
 
-  const bereich: Element = { ...structuredClone(bereichsVorlage), value: inhalt };
+  function einfuegen(quelle: Element, ziel: Behaelter, herkunft: string) {
+    const istBlock = modus === "advanced" && quelle.modelType === BLOCK;
+    const semanticId = semantikSchluessel(quelle.semanticId);
+    const fund: Fund = { idShort: ziel.pfad + (quelle.idShort ?? ""), semanticId: semanticId ?? "", quelle: herkunft };
+
+    if (!semanticId) {
+      if (istBlock) {
+        // Ohne semanticId gibt es keinen Block, mit dem man zusammenführen könnte: Inhalt eine Ebene höher.
+        bericht.aufgeloesteBloecke.push(fund);
+        for (const kind of (quelle.value as Element[] | undefined) ?? []) einfuegen(kind, ziel, herkunft);
+      } else {
+        bericht.gelesen++;
+        bericht.ohneSemanticId.push(fund);
+      }
+      return;
+    }
+    if (!istBlock) bericht.gelesen++;
+
+    const frueher = ziel.index.get(semanticId);
+    if (frueher) {
+      const erwartet = typBeschreibung(frueher.quelle);
+      const gefunden = typBeschreibung(quelle);
+      if (erwartet !== gefunden) {
+        // Ein abgewiesener Block zählt als eine gelesene Einheit, damit die Bilanz aufgeht.
+        if (istBlock) bericht.gelesen++;
+        bericht.konflikte.push({ ...fund, erwartet, gefunden });
+      } else if (istBlock) {
+        for (const kind of (quelle.value as Element[] | undefined) ?? []) {
+          einfuegen(kind, kinderVon.get(frueher.ziel)!, herkunft);
+        }
+      } else {
+        const schluessel = `${ziel.ort}|${semanticId}`;
+        const eintrag = mehrfach.get(schluessel) ?? { ...frueher.fund, weitere: [] };
+        eintrag.weitere.push(herkunft);
+        mehrfach.set(schluessel, eintrag);
+      }
+      return;
+    }
+
+    const element = istBlock ? alsBlockHuelle(quelle) : alsTemplateElement(quelle);
+    const gewuenscht = mitVersion(quelle.idShort || "Eigenschaft", quelle.semanticId);
+    element.idShort = freierName(gewuenscht, ziel.namen);
+    const angelegt: Fund = { ...fund, idShort: ziel.pfad + element.idShort };
+    if (element.idShort !== gewuenscht || !quelle.idShort) {
+      bericht.umbenannt.push({ ...angelegt, von: quelle.idShort ?? "" });
+    }
+    if (!IDSHORT_REGEL.test(element.idShort)) bericht.ungueltigeIdShorts.push(angelegt);
+    ziel.namen.add(element.idShort);
+    ziel.index.set(semanticId, { quelle, ziel: element, fund: angelegt });
+    ziel.liste.push(element);
+    cdsUebernehmen(quelle.semanticId, angelegt);
+
+    if (istBlock) {
+      bericht.bloecke++;
+      const innen = neuerBehaelter(element.value as Element[], `${angelegt.idShort}.`, `${ziel.ort}/${semanticId}`);
+      kinderVon.set(element, innen);
+      for (const kind of (quelle.value as Element[] | undefined) ?? []) einfuegen(kind, innen, herkunft);
+    } else {
+      bericht.uebernommen.push(angelegt);
+    }
+  }
+
+  for (const eintrag of eintraege) {
+    bericht.submodelZahl++;
+    const herkunft = `${eintrag.datei} › ${eintrag.submodel.idShort ?? eintrag.submodel.id}`;
+    const elemente = eintrag.submodel.submodelElements ?? [];
+    for (const element of modus === "advanced" ? elemente : blaetter(elemente)) einfuegen(element, wurzel, herkunft);
+  }
+
+  ohneLeereListen(wurzel.liste);
+  const bereich: Element = { ...structuredClone(bereichsVorlage), value: wurzel.liste };
   bereiche.value = [bereich];
   umgebung.conceptDescriptions = [...(umgebung.conceptDescriptions ?? []), ...neueCDs];
   bericht.neueCDs = neueCDs.length;
@@ -140,9 +198,7 @@ function freierName(gewuenscht: string, belegt: Set<string>): string {
   return `${gewuenscht}_${n}`;
 }
 
-function alsTemplateElement(blatt: Element): Element {
-  const element = structuredClone(blatt);
-  for (const feld of INSTANZWERTE) delete element[feld];
+function mitKardinalitaet(element: Element): Element {
   const kardinalitaet: Qualifier = {
     semanticId: {
       type: "ExternalReference",
@@ -154,5 +210,39 @@ function alsTemplateElement(blatt: Element): Element {
   };
   const uebrige = (element.qualifiers ?? []).filter((q) => q.type !== "SMT/Cardinality");
   element.qualifiers = [...uebrige, kardinalitaet];
+  return element;
+}
+
+/** AAS 3.0 verbietet value: [] (aas-core: "Value must be either not set or have at least one item"). */
+function ohneLeereListen(elemente: Element[]) {
+  for (const e of elemente) {
+    if (e.modelType !== BLOCK || !Array.isArray(e.value)) continue;
+    if (e.value.length === 0) delete e.value;
+    else ohneLeereListen(e.value as Element[]);
+  }
+}
+
+/** Block ohne Inhalt; die Kinder kommen einzeln über einfuegen hinzu. */
+function alsBlockHuelle(block: Element): Element {
+  const { value: _inhalt, ...rest } = block;
+  return mitKardinalitaet({ ...structuredClone(rest), value: [] } as Element);
+}
+
+/**
+ * Blatt ohne Instanzwerte. Listen und Entities (Basic löst sie nicht auf, Advanced übernimmt sie als Ganzes)
+ * behalten ihre Kinder; geleert werden nur deren Blätter.
+ */
+function alsTemplateElement(quelle: Element): Element {
+  return mitKardinalitaet(ohneInstanzwerte(structuredClone(quelle)));
+}
+
+function ohneInstanzwerte(element: Element): Element {
+  const kinder = element.modelType === "Entity" ? element.statements : element.value;
+  const istBehaelter = ["SubmodelElementCollection", "SubmodelElementList", "Entity"].includes(element.modelType);
+  if (istBehaelter) {
+    if (Array.isArray(kinder)) (kinder as Element[]).forEach(ohneInstanzwerte);
+    return element;
+  }
+  for (const feld of INSTANZWERTE) delete element[feld];
   return element;
 }

@@ -1,5 +1,5 @@
 import type { Fund } from "../merge/bericht";
-import type { Ergebnis } from "../merge/zusammenfuehren";
+import type { Ergebnis, Modus } from "../merge/zusammenfuehren";
 
 const DATEINAME = "TechnicalData-merged.json";
 
@@ -13,7 +13,7 @@ function herunterladen(inhalt: unknown) {
   URL.revokeObjectURL(url);
 }
 
-export function ErgebnisAnsicht({ ergebnis }: { ergebnis: Ergebnis }) {
+export function ErgebnisAnsicht({ ergebnis, modus }: { ergebnis: Ergebnis; modus: Modus }) {
   const { bericht } = ergebnis;
   const weitere = bericht.mehrfach.reduce((summe, m) => summe + m.weitere.length, 0);
   const zahl = (n: number) => n.toLocaleString("de-DE");
@@ -31,10 +31,11 @@ export function ErgebnisAnsicht({ ergebnis }: { ergebnis: Ergebnis }) {
         </button>
       </div>
 
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <dl className={`grid grid-cols-2 gap-3 ${modus === "advanced" ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
         <Kennzahl name="Submodels" wert={bericht.submodelZahl} />
         <Kennzahl name="Gelesen" wert={bericht.gelesen} />
         <Kennzahl name="Übernommen" wert={bericht.uebernommen.length} />
+        {modus === "advanced" && <Kennzahl name="Blöcke" wert={bericht.bloecke} />}
         <Kennzahl name="Neue CDs" wert={bericht.neueCDs} />
       </dl>
       <p className="text-xs text-slate-500 tabular-nums">
@@ -64,8 +65,19 @@ export function ErgebnisAnsicht({ ergebnis }: { ergebnis: Ergebnis }) {
           zusatz={(f) => `in der Quelle ${f.von || "ohne idShort"}`}
         />
         <Liste titel="Weggelassen, keine semanticId" warnung funde={bericht.ohneSemanticId} />
+        <Liste
+          titel="Block ohne semanticId, Inhalt eine Ebene höher einsortiert"
+          warnung
+          funde={bericht.aufgeloesteBloecke}
+        />
         <Liste titel="idShort verstößt gegen die AAS-Regel" warnung funde={bericht.ungueltigeIdShorts} />
-        <Liste titel="Keine ConceptDescription in den Quellen" warnung funde={bericht.fehlendeCDs} />
+        <Liste
+          titel="Keine ConceptDescription in den Quellen"
+          warnung
+          funde={bericht.fehlendeCDs}
+          zusatz={(f) => (f.cdId === f.semanticId ? f.quelle : `fehlt: ${f.cdId}`)}
+          hinweis={(f) => f.quelle}
+        />
       </div>
     </section>
   );
